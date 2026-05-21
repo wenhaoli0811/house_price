@@ -1,0 +1,106 @@
+import numpy as np
+import torch
+from torch import nn
+import pandas as pd
+
+# 读取数据
+train_data = pd.read_csv('train.csv')
+test_data = pd.read_csv('test.csv')
+
+# 合并训练集和测试集特征
+all_features = pd.concat(
+    (train_data.iloc[:, 1:-1],
+     test_data.iloc[:, 1:])
+)
+
+# 获取数值特征
+numeric_features = all_features.dtypes[
+    all_features.dtypes != 'object'
+].index
+
+# 标准化
+all_features[numeric_features] = (
+    all_features[numeric_features]
+    - all_features[numeric_features].mean()
+) / all_features[numeric_features].std()
+
+# 缺失值填0
+all_features[numeric_features] = \
+    all_features[numeric_features].fillna(0)
+
+# one-hot编码
+all_features = pd.get_dummies(
+    all_features,
+    dummy_na=True
+).astype(float)
+
+# 转换成tensor
+n_train = train_data.shape[0]
+
+train_features = torch.tensor(
+    all_features[:n_train].values,
+    dtype=torch.float32
+)
+
+test_features = torch.tensor(
+    all_features[n_train:].values,
+    dtype=torch.float32
+)
+
+#对房价取log
+train_labels = torch.tensor(
+    np.log(train_data.SalePrice.values.reshape(-1, 1)),
+    dtype=torch.float32
+)
+
+# 定义模型
+in_features = train_features.shape[1]
+
+net = nn.Sequential(
+    nn.Linear(in_features, 1)
+)
+
+# 损失函数
+loss = nn.MSELoss()
+
+# 优化器
+optimizer = torch.optim.Adam(
+    net.parameters(),
+    lr=0.01
+)
+
+# 训练
+num_epochs = 100
+
+for epoch in range(num_epochs):
+
+    optimizer.zero_grad()
+
+    l = loss(
+        net(train_features),
+        train_labels
+    )
+
+    l.backward()
+
+    optimizer.step()
+
+    if (epoch + 1) % 10 == 0:
+        print(f'epoch {epoch+1}, loss {l.item():f}')
+
+# 预测
+preds = np.exp(
+    net(test_features).detach().numpy()
+)
+# 保存结果
+submission = pd.DataFrame({
+    'Id': test_data['Id'],
+    'SalePrice': preds.reshape(-1)
+})
+
+submission.to_csv(
+    'submission.csv',
+    index=False
+)
+
+print("训练完成")
