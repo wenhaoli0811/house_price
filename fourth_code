@@ -1,0 +1,129 @@
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+import numpy as np
+import torch
+from torch import nn
+import pandas as pd
+import random
+import matplotlib.pyplot as plt
+
+torch.manual_seed(42)
+np.random.seed(42)
+random.seed(42)
+#读取数据
+train_data = pd.read_csv('train.csv')
+test_data = pd.read_csv('test.csv')
+
+#合并训练集和测试集特征（只用于统一特征空间）
+all_features = pd.concat(
+    (train_data.iloc[:, 1:-1],
+     test_data.iloc[:, 1:])
+)
+
+# one-hot 编码
+all_features = pd.get_dummies(all_features, dummy_na=True).astype(float)
+
+# 拆分回train/test
+n_train = train_data.shape[0]
+
+train_features = all_features[:n_train]
+test_features = all_features[n_train:]
+
+
+#标准化
+
+numeric_features = train_features.columns
+
+means = train_features.mean()
+stds = train_features.std()
+
+train_features = (train_features - means) / stds
+test_features = (test_features - means) / stds
+
+# 缺失值处理（标准化后再做）
+train_features = train_features.fillna(0)
+test_features = test_features.fillna(0)
+
+# 转 tensor
+train_features = torch.tensor(train_features.values, dtype=torch.float32)
+test_features = torch.tensor(test_features.values, dtype=torch.float32)
+
+train_labels = torch.tensor(
+    np.log(train_data.SalePrice.values.reshape(-1, 1)),
+    dtype=torch.float32
+)
+
+#定义模型
+in_features = train_features.shape[1]
+
+net = nn.Sequential(
+    nn.Linear(in_features, 256),
+    nn.ReLU(),
+
+    nn.Linear(256, 128),
+    nn.ReLU(),
+
+    nn.Linear(128, 1)
+)
+
+#损失函数
+loss = nn.HuberLoss()
+
+#优化器
+optimizer = torch.optim.Adam(
+    net.parameters(),
+    lr=0.0005
+)
+
+#训练
+num_epochs = 500
+loss_list = []
+net.train()
+for epoch in range(num_epochs):
+
+    optimizer.zero_grad()
+
+    l = loss(
+        net(train_features),
+        train_labels
+    )
+
+    l.backward()
+
+    optimizer.step()
+
+    loss_list.append(l.item())
+
+    if (epoch + 1) % 10 == 0:
+        print(f'epoch {epoch+1}, loss {l.item():f}')
+
+# 绘制训练损失曲线
+plt.figure(figsize=(8, 5))
+plt.plot(range(1, num_epochs + 1), loss_list)
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.title('Training Loss Curve')
+plt.grid(True)
+
+plt.savefig('loss_curve.png')
+plt.show()
+
+#预测
+net.eval()
+
+with torch.no_grad():
+    preds = np.exp(
+        net(test_features).numpy()
+    )
+# 保存结果
+submission = pd.DataFrame({
+    'Id': test_data['Id'],
+    'SalePrice': preds.reshape(-1)
+})
+
+submission.to_csv(
+    'submission.csv',
+    index=False
+)
+
+print("训练完成")
